@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv" // Added for string conversion
 	"time"
 )
 
@@ -22,7 +23,8 @@ type Config struct {
 type TautulliResponse struct {
 	Response struct {
 		Data struct {
-			StreamCount int       `json:"stream_count"`
+			// Changed StreamCount to string to handle API response correctly.
+			StreamCount string    `json:"stream_count"`
 			Sessions    []Session `json:"sessions"`
 		} `json:"data"`
 	} `json:"response"`
@@ -33,14 +35,14 @@ type Session struct {
 	User             string `json:"user"`
 	Player           string `json:"player"`
 	GrandparentTitle string `json:"grandparent_title"` // e.g., The name of the TV Show
-	Title            string `json:"title"`            // e.g., The movie title or episode title
-	MediaType        string `json:"media_type"`       // "movie" or "episode"
-	Poster           string `json:"poster"`           // URL for the media poster
+	Title            string `json:"title"`             // e.g., The movie title or episode title
+	MediaType        string `json:"media_type"`        // "movie" or "episode"
+	Poster           string `json:"poster"`            // URL for the media poster
 }
 
 // PageData is the data structure passed to the HTML template for rendering.
 type PageData struct {
-	StreamCount int
+	StreamCount int // Kept as int for template logic
 	Sessions    []Session
 	Timestamp   string
 }
@@ -99,14 +101,22 @@ func httpHandler(w http.ResponseWriter, r *http.Request, config *Config) {
 		return
 	}
 
-	// 4. Prepare the data structure to be passed to the HTML template.
+	// 4. Convert the stream_count string from the API to an integer.
+	streamCount, err := strconv.Atoi(tautulliData.Response.Data.StreamCount)
+	if err != nil {
+		http.Error(w, "Failed to parse stream count from Tautulli", http.StatusInternalServerError)
+		log.Printf("Error converting stream_count string to int: %v", err)
+		return
+	}
+
+	// 5. Prepare the data structure to be passed to the HTML template.
 	pageData := PageData{
-		StreamCount: tautulliData.Response.Data.StreamCount,
+		StreamCount: streamCount, // Use the converted integer
 		Sessions:    tautulliData.Response.Data.Sessions,
 		Timestamp:   time.Now().Format("3:04 PM"),
 	}
 
-	// 5. Parse our HTML template string.
+	// 6. Parse our HTML template string.
 	tmpl, err := template.New("trmnl").Parse(htmlTemplate)
 	if err != nil {
 		http.Error(w, "Failed to parse HTML template", http.StatusInternalServerError)
@@ -114,7 +124,7 @@ func httpHandler(w http.ResponseWriter, r *http.Request, config *Config) {
 		return
 	}
 
-	// 6. Set the content type and execute the template, writing the output to the response.
+	// 7. Set the content type and execute the template, writing the output to the response.
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := tmpl.Execute(w, pageData); err != nil {
 		http.Error(w, "Failed to render template", http.StatusInternalServerError)
