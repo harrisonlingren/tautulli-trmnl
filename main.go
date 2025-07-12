@@ -28,6 +28,7 @@ type Session struct {
 	GrandparentTitle string `json:"grandparent_title"`
 	Title            string `json:"title"`
 	MediaType        string `json:"media_type"`
+	Summary          string `json:"summary"`
 	Thumb            string `json:"thumb"`
 	ProgressPercent  string `json:"progress_percent"`
 	PosterURL        string `json:"poster_url"` // This will be constructed in our code
