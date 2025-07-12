@@ -7,16 +7,9 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"time"
 )
-
-// Config holds the configuration for the Tautulli API.
-type Config struct {
-	TautulliURL    string
-	TautulliAPIKey string
-}
 
 // TautulliResponse defines the structure for the JSON response from the Tautulli API.
 type TautulliResponse struct {
@@ -48,7 +41,7 @@ type PageData struct {
 	Timestamp   string
 }
 
-// htmlTemplate has been completely redesigned for a horizontal, card-based grid layout.
+// htmlTemplate has been designed for a horizontal, card-based grid layout.
 const htmlTemplate = `
 <div class="view view--full" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
     <div class="layout">
@@ -97,9 +90,20 @@ const htmlTemplate = `
 `
 
 // httpHandler fetches data and renders the richer HTML layout.
-func httpHandler(w http.ResponseWriter, r *http.Request, config *Config) {
+func httpHandler(w http.ResponseWriter, r *http.Request) {
+	// **MODIFIED:** Get Tautulli URL and API Key from query parameters instead of a config struct.
+	tautulliURL := r.URL.Query().Get("tautulli_url")
+	apiKey := r.URL.Query().Get("api_key")
+
+	// Validate that the required parameters were provided.
+	if tautulliURL == "" || apiKey == "" {
+		http.Error(w, "Missing required query parameters: 'tautulli_url' and 'api_key'", http.StatusBadRequest)
+		log.Println("Error: Received request with missing 'tautulli_url' or 'api_key' query parameters.")
+		return
+	}
+
 	// 1. Construct the Tautulli API URL.
-	apiURL := fmt.Sprintf("%s/api/v2?apikey=%s&cmd=get_activity", config.TautulliURL, config.TautulliAPIKey)
+	apiURL := fmt.Sprintf("%s/api/v2?apikey=%s&cmd=get_activity", tautulliURL, apiKey)
 
 	// 2. Make the request to Tautulli.
 	client := http.Client{Timeout: 10 * time.Second}
@@ -138,7 +142,7 @@ func httpHandler(w http.ResponseWriter, r *http.Request, config *Config) {
 		session := &sessions[i]
 		if session.Thumb != "" {
 			encodedThumb := url.QueryEscape(session.Thumb)
-			session.PosterURL = fmt.Sprintf("%s/api/v2?apikey=%s&cmd=pms_image_proxy&img=%s", config.TautulliURL, config.TautulliAPIKey, encodedThumb)
+			session.PosterURL = fmt.Sprintf("%s/api/v2?apikey=%s&cmd=pms_image_proxy&img=%s", tautulliURL, apiKey, encodedThumb)
 		} else {
 			session.PosterURL = "https://placehold.co/120x180/eee/ccc?text=No+Art"
 		}
@@ -172,19 +176,8 @@ func httpHandler(w http.ResponseWriter, r *http.Request, config *Config) {
 }
 
 func main() {
-	// Load configuration from environment variables.
-	config := &Config{
-		TautulliURL:    os.Getenv("TAUTULLI_URL"),
-		TautulliAPIKey: os.Getenv("TAUTULLI_API_KEY"),
-	}
-
-	if config.TautulliURL == "" || config.TautulliAPIKey == "" {
-		log.Fatal("TAUTULLI_URL and TAUTULLI_API_KEY environment variables must be set.")
-	}
-
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		httpHandler(w, r, config)
-	})
+	// **REMOVED:** No longer need to load config from environment variables.
+	http.HandleFunc("/", httpHandler)
 
 	port := "8080"
 	log.Printf("Starting Tautulli TRMNL plugin server on port %s", port)
