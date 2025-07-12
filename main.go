@@ -3,8 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"html/template"
-	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -32,105 +30,18 @@ type Session struct {
 	MediaType        string `json:"media_type"`
 	Thumb            string `json:"thumb"`
 	ProgressPercent  string `json:"progress_percent"`
-	PosterURL        string // This will be constructed in our code
-	Progress         int    // This will be calculated
+	PosterURL        string `json:"poster_url"` // This will be constructed in our code
+	Progress         int    `json:"progress"`   // This will be calculated
 }
 
-// PageData is the data structure passed to the HTML template.
+// PageData is the root object for our JSON response.
 type PageData struct {
-	StreamCount int
-	Sessions    []Session
-	Timestamp   string
+	StreamCount int       `json:"stream_count"`
+	Sessions    []Session `json:"sessions"`
+	Timestamp   string    `json:"timestamp"`
 }
 
-const htmlTemplate = `<markup>
-<div class="view view--full">
-    <div class="layout">
-        <div class="column">
-            {{if gt .StreamCount 0}}
-            <div class="layout mt-4">
-                <div class="columns columns--2">
-                    {{range .Sessions}}
-                    <div class="column">
-                        <div class="widget">
-                            <div class="widget__media">
-                                <img src="{{.PosterURL}}" alt="Poster" />
-                            </div>
-                            <div class="widget__body">
-                                <span class="widget__title">
-                                    {{if eq .MediaType "episode"}}
-                                        {{.GrandparentTitle}}
-                                    {{else}}
-                                        {{.Title}}
-                                    {{end}}
-                                </span>
-                                {{if eq .MediaType "episode"}}
-                                    <span class="widget__subtitle">{{.Title}}</span>
-                                {{end}}
-                                <span class="widget__label mt-2">{{.User}}</span>
-                                <div class="progress-bar mt-3">
-                                    <div class="progress-bar__fg" style="width: {{.Progress}}%;"></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    {{end}}
-                </div>
-            </div>
-            {{else}}
-            <div class="markdown">
-                <div class="content-element content content--center mt-4">
-                    <p>Nothing is currently playing.</p>
-                </div>
-            </div>
-            {{end}}
-            <span class="label label--underline mt-4">Updated: {{.Timestamp}}</span>
-        </div>
-    </div>
-</div>
-</markup>
-`
-
-// imageProxyHandler fetches images from Tautulli and serves them through our local server.
-func imageProxyHandler(w http.ResponseWriter, r *http.Request) {
-	tautulliURL := r.URL.Query().Get("tautulli_url")
-	apiKey := r.URL.Query().Get("api_key")
-	imgPath := r.URL.Query().Get("img")
-
-	if tautulliURL == "" || apiKey == "" || imgPath == "" {
-		http.Error(w, "Missing required query parameters for image proxy", http.StatusBadRequest)
-		return
-	}
-
-	if !strings.HasPrefix(tautulliURL, "http://") && !strings.HasPrefix(tautulliURL, "https://") {
-		tautulliURL = "https://" + tautulliURL
-	}
-
-	// Construct the full, original Tautulli image proxy URL.
-	fullImgURL := fmt.Sprintf("%s/api/v2?apikey=%s&cmd=pms_image_proxy&img=%s", tautulliURL, apiKey, imgPath)
-
-	// Fetch the image from Tautulli.
-	client := http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Get(fullImgURL)
-	if err != nil {
-		http.Error(w, "Failed to fetch image from Tautulli", http.StatusInternalServerError)
-		log.Printf("Image proxy failed to connect to Tautulli: %v", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	// Copy the headers from the Tautulli response (like Content-Type) to our response.
-	for key, values := range resp.Header {
-		for _, value := range values {
-			w.Header().Add(key, value)
-		}
-	}
-
-	// Stream the image data directly to the client.
-	io.Copy(w, resp.Body)
-}
-
-// httpHandler fetches data and renders the richer HTML layout.
+// httpHandler fetches data from Tautulli and returns it as a JSON object.
 func httpHandler(w http.ResponseWriter, r *http.Request) {
 	// Get Tautulli URL and API Key from query parameters.
 	tautulliURL := r.URL.Query().Get("tautulli_url")
@@ -170,7 +81,6 @@ func httpHandler(w http.ResponseWriter, r *http.Request) {
 	// 4. Convert stream_count to an integer.
 	streamCount, err := strconv.Atoi(tautulliData.Response.Data.StreamCount)
 	if err != nil {
-		// If stream_count is empty or not a number, default to 0.
 		streamCount = 0
 	}
 
@@ -180,47 +90,38 @@ func httpHandler(w http.ResponseWriter, r *http.Request) {
 		sessions = sessions[:4]
 	}
 
-	// 5. Construct poster URLs and calculate progress for each session.
+	// 5. Construct full poster URLs and calculate progress for each session.
 	for i := range sessions {
 		session := &sessions[i]
 		if session.Thumb != "" {
+			// **MODIFIED:** Create the full, absolute URL for the poster.
 			encodedThumb := url.QueryEscape(session.Thumb)
-			session.PosterURL = fmt.Sprintf("/image?img=%s&tautulli_url=%s&api_key=%s", encodedThumb, url.QueryEscape(tautulliURL), url.QueryEscape(apiKey))
+			session.PosterURL = fmt.Sprintf("%s/api/v2?apikey=%s&cmd=pms_image_proxy&img=%s", tautulliURL, apiKey, encodedThumb)
 		} else {
 			session.PosterURL = "https://placehold.co/120x180/eee/ccc?text=No+Art"
 		}
 
-		// Calculate progress
 		if progress, err := strconv.Atoi(session.ProgressPercent); err == nil {
 			session.Progress = progress
 		}
 	}
 
-	// 6. Prepare data for the template.
+	// 6. Prepare data for the final JSON response.
 	pageData := PageData{
 		StreamCount: streamCount,
 		Sessions:    sessions,
 		Timestamp:   time.Now().Format("3:04 PM"),
 	}
 
-	// 7. Parse and execute the template.
-	tmpl, err := template.New("trmnl").Parse(htmlTemplate)
-	if err != nil {
-		http.Error(w, "Failed to parse HTML template", http.StatusInternalServerError)
-		log.Printf("Error parsing template: %v", err)
-		return
-	}
-
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := tmpl.Execute(w, pageData); err != nil {
-		http.Error(w, "Failed to render template", http.StatusInternalServerError)
-		log.Printf("Error executing template: %v", err)
+	// 7. Set the content type and encode the response as JSON.
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(pageData); err != nil {
+		log.Printf("Error encoding JSON response: %v", err)
 	}
 }
 
 func main() {
 	http.HandleFunc("/", httpHandler)
-	http.HandleFunc("/image", imageProxyHandler)
 
 	port := "8080"
 	log.Printf("Starting Tautulli TRMNL plugin server on port %s", port)

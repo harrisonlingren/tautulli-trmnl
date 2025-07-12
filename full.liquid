@@ -1,0 +1,60 @@
+<markup>
+  <div class="view view--full">
+    <div class="layout">
+      <div class="column">
+        {% if stream_count > 0 %}
+          <div class="layout mt-4">
+            <div class="columns columns--2">
+              {% for session in sessions %}
+                <div class="column">
+                  <div
+                    class="layout"
+                    style="background-color: #f9f9f9; border-radius: 8px; overflow: hidden; border: 1px solid #eee; height: 100%;"
+                  >
+                    <div class="columns" style="height: 100%;">
+                      <div class="column" style="flex: 0 0 120px;">
+                        <img
+                          src="{{ session.poster_url }}"
+                          alt="Poster"
+                          style="width: 120px; height: 100%; object-fit: cover; display: block;"
+                        >
+                      </div>
+                      <div
+                        class="column"
+                        style="padding: 0.75rem 1rem; display: flex; flex-direction: column;"
+                      >
+                        <p class="font-weight--bold">
+                          {% if session.media_type == 'episode' %}
+                            {{ session.grandparent_title }}
+                          {% else %}
+                            {{ session.title }}
+                          {% endif %}
+                        </p>
+                        {% if session.media_type == 'episode' %}
+                          <p class="text--small">{{ session.title }}</p>
+                        {% endif %}
+                        <p class="text--small color-text--secondary mt-2">{{ session.user }}</p>
+                        <div class="progress-bar mt-auto" style="width: 100%;">
+                          <div class="progress-bar__fg" style="width: {{ session.progress }}%;"></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          </div>
+        {% else %}
+          <div class="markdown">
+            <div class="content-element content content--center mt-4">
+              <p>Nothing is currently playing.</p>
+            </div>
+          </div>
+        {% endif %}
+        <span class="label label--underline mt-4" style="text-align: right; display: block;"
+          >Updated: {{ timestamp -}}
+        </span>
+      </div>
+    </div>
+  </div>
+</markup>
