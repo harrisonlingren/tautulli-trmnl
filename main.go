@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -41,55 +43,92 @@ type PageData struct {
 	Timestamp   string
 }
 
-// **MODIFIED:** Reverted the template to use custom inline styles instead of native TRMNL framework classes.
-const htmlTemplate = `
-<markup>
-    <div class="view view--full" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-        <div class="layout">
-            <div class="column">
-                {{if gt .StreamCount 0}}
-                    <div style="display: flex; flex-wrap: wrap; gap: 1rem; justify-content: flex-start; margin-top: 1rem;">
-                        {{range .Sessions}}
-                            <div style="flex: 1 1 48%; min-width: 350px; display: flex; background-color: #f9f9f9; border-radius: 8px; overflow: hidden; border: 1px solid #eee;">
-                                <div style="flex-shrink: 0;">
-                                    <img src="{{.PosterURL}}" style="width: 120px; height: 180px; object-fit: cover;" alt="Poster" />
-                                </div>
-                                <div style="padding: 0.75rem 1rem; display: flex; flex-direction: column; justify-content: center; flex-grow: 1;">
-                                    <p style="margin: 0; font-weight: bold; font-size: 1.2rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                                        {{if eq .MediaType "episode"}}
-                                            {{.GrandparentTitle}}
-                                        {{else}}
-                                            {{.Title}}
-                                        {{end}}
-                                    </p>
+const htmlTemplate = `<markup>
+<div class="view view--full">
+    <div class="layout">
+        <div class="column">
+            {{if gt .StreamCount 0}}
+            <div class="layout mt-4">
+                <div class="columns columns--2">
+                    {{range .Sessions}}
+                    <div class="column">
+                        <div class="widget">
+                            <div class="widget__media">
+                                <img src="{{.PosterURL}}" alt="Poster" />
+                            </div>
+                            <div class="widget__body">
+                                <span class="widget__title">
                                     {{if eq .MediaType "episode"}}
-                                        <p style="margin: 0.25rem 0; font-size: 1rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{.Title}}</p>
+                                        {{.GrandparentTitle}}
+                                    {{else}}
+                                        {{.Title}}
                                     {{end}}
-                                    <p style="margin: 0.5rem 0 0; font-size: 0.9rem; color: #555;">
-                                        {{.User}}
-                                    </p>
-                                    <div style="margin-top: auto; padding-top: 1rem;">
-                                        <div style="background-color: #e0e0e0; border-radius: 4px; overflow: hidden;">
-                                            <div style="height: 8px; width: {{.Progress}}%; background-color: #76c7c0; border-radius: 4px;"></div>
-                                        </div>
-                                    </div>
+                                </span>
+                                {{if eq .MediaType "episode"}}
+                                    <span class="widget__subtitle">{{.Title}}</span>
+                                {{end}}
+                                <span class="widget__label mt-2">{{.User}}</span>
+                                <div class="progress-bar mt-3">
+                                    <div class="progress-bar__fg" style="width: {{.Progress}}%;"></div>
                                 </div>
                             </div>
-                        {{end}}
-                    </div>
-                {{else}}
-                    <div class="markdown">
-                        <div class="content-element content content--center mt-4">
-                            <p>Nothing is currently playing.</p>
                         </div>
                     </div>
-                {{end}}
-                <span class="label label--underline mt-4" style="text-align: right; display: block;">Updated: {{.Timestamp}}</span>
+                    {{end}}
+                </div>
             </div>
+            {{else}}
+            <div class="markdown">
+                <div class="content-element content content--center mt-4">
+                    <p>Nothing is currently playing.</p>
+                </div>
+            </div>
+            {{end}}
+            <span class="label label--underline mt-4">Updated: {{.Timestamp}}</span>
         </div>
     </div>
+</div>
 </markup>
 `
+
+// imageProxyHandler fetches images from Tautulli and serves them through our local server.
+func imageProxyHandler(w http.ResponseWriter, r *http.Request) {
+	tautulliURL := r.URL.Query().Get("tautulli_url")
+	apiKey := r.URL.Query().Get("api_key")
+	imgPath := r.URL.Query().Get("img")
+
+	if tautulliURL == "" || apiKey == "" || imgPath == "" {
+		http.Error(w, "Missing required query parameters for image proxy", http.StatusBadRequest)
+		return
+	}
+
+	if !strings.HasPrefix(tautulliURL, "http://") && !strings.HasPrefix(tautulliURL, "https://") {
+		tautulliURL = "https://" + tautulliURL
+	}
+
+	// Construct the full, original Tautulli image proxy URL.
+	fullImgURL := fmt.Sprintf("%s/api/v2?apikey=%s&cmd=pms_image_proxy&img=%s", tautulliURL, apiKey, imgPath)
+
+	// Fetch the image from Tautulli.
+	client := http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(fullImgURL)
+	if err != nil {
+		http.Error(w, "Failed to fetch image from Tautulli", http.StatusInternalServerError)
+		log.Printf("Image proxy failed to connect to Tautulli: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	// Copy the headers from the Tautulli response (like Content-Type) to our response.
+	for key, values := range resp.Header {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
+
+	// Stream the image data directly to the client.
+	io.Copy(w, resp.Body)
+}
 
 // httpHandler fetches data and renders the richer HTML layout.
 func httpHandler(w http.ResponseWriter, r *http.Request) {
@@ -97,11 +136,14 @@ func httpHandler(w http.ResponseWriter, r *http.Request) {
 	tautulliURL := r.URL.Query().Get("tautulli_url")
 	apiKey := r.URL.Query().Get("api_key")
 
-	// Validate that the required parameters were provided.
 	if tautulliURL == "" || apiKey == "" {
 		http.Error(w, "Missing required query parameters: 'tautulli_url' and 'api_key'", http.StatusBadRequest)
 		log.Println("Error: Received request with missing 'tautulli_url' or 'api_key' query parameters.")
 		return
+	}
+
+	if !strings.HasPrefix(tautulliURL, "http://") && !strings.HasPrefix(tautulliURL, "https://") {
+		tautulliURL = "https://" + tautulliURL
 	}
 
 	// 1. Construct the Tautulli API URL.
@@ -143,7 +185,7 @@ func httpHandler(w http.ResponseWriter, r *http.Request) {
 		session := &sessions[i]
 		if session.Thumb != "" {
 			encodedThumb := url.QueryEscape(session.Thumb)
-			session.PosterURL = fmt.Sprintf("%s/api/v2?apikey=%s&cmd=pms_image_proxy&img=%s", tautulliURL, apiKey, encodedThumb)
+			session.PosterURL = fmt.Sprintf("/image?img=%s&tautulli_url=%s&api_key=%s", encodedThumb, url.QueryEscape(tautulliURL), url.QueryEscape(apiKey))
 		} else {
 			session.PosterURL = "https://placehold.co/120x180/eee/ccc?text=No+Art"
 		}
@@ -178,6 +220,7 @@ func httpHandler(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	http.HandleFunc("/", httpHandler)
+	http.HandleFunc("/image", imageProxyHandler)
 
 	port := "8080"
 	log.Printf("Starting Tautulli TRMNL plugin server on port %s", port)
