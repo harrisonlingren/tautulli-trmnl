@@ -2,33 +2,26 @@
   {% if stream_count > 0 %}
   {% for session in sessions %}
   <div class="richtext richtext--left" data-content-limiter="true" data-content-max-height="140">
-    <div class="content content--large">
-      <span class="label label--underline">
+    <div class="content">
+      <span class="label label--small"><b>
         {% if session.media_type == 'episode' %}
         {{ session.grandparent_title }} | {{ session.title }}
         {% else %}
         {{ session.title }}
-        {% endif %}
+        {% endif %}</b>
       </span>
     </div>
-
+    
     <div class="content content--small">
       <span class="label label--small">{{ session.user }} | {{ session.player }}</p>
     </div>
+
     <div class="progress-bar progress-bar--small" style="width: 100%">
-      <div class="label">
-        <span class="label label--small">ᐅ</span>
-        <span class="value value--xxsmall">{{ session.progress }}%</span>
-      </div>
       <div class="track">
         <div class="fill" style="width: {{ session.progress }}%"></div>
       </div>
     </div>
-    <br>
-    <div class="content content--small">
-      <p>{{ session.summary }}</p>
-    </div>
-
+    
   </div>
   {% endfor %}
   {% else %}

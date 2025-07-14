@@ -16,15 +16,10 @@
       <span class="label label--small">{{ session.user }} | {{ session.player }}</p>
     </div>
     <div class="progress-bar progress-bar--small" style="width: 100%">
-      <div class="label">
-        <span class="label label--small">ᐅ</span>
-        <span class="value value--xxsmall">{{ session.progress }}%</span>
-      </div>
       <div class="track">
         <div class="fill" style="width: {{ session.progress }}%"></div>
       </div>
     </div>
-    <br>
     <div class="content content--small">
       <p>{{ session.summary }}</p>
     </div>
